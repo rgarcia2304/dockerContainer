@@ -15,22 +15,32 @@ constexpr size_t STACK_SIZE = 1024 * 1024;
 int child_main(void* arg)
 {
 	char** args = static_cast<char**>(arg); 
-	const char* host = "mini-docker"; 
+	const char* host = "mini-docker";
+
+	bool bind_mounted = false; 
+	bool pivoted = false;
+
+	const char* new_root = "/home/cmpsc311/mini-rootfs";
+	std::string old_root_path = std::string(new_root) + "/oldrootfs";
+
 	if(sethostname(host, strlen(host)) == -1)
 	{
 		std::perror("set hostname failed");
 	}
 	
-	mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr); 
+	if(mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr) == -1)
+	{
+		std::perror("private remount failed"); 
+		goto fail; 
+	}
 
-	const char* new_root = "/home/cmpsc311/mini-rootfs";
 	if(mount(new_root, new_root, nullptr, MS_BIND, nullptr) == -1)
 	{
 		std::perror("Failure to mount root to itself"); 
-		return -1; 
+		goto fail; 
 	}
 	
-	std::string old_root_path = std::string(new_root) + "/oldrootfs";
+	bind_mounted = true; 
 	if(mkdir(old_root_path.c_str(), 0777) == -1)
 	{
 		std::perror("Failure to create old root path for destruction");
@@ -42,6 +52,7 @@ int child_main(void* arg)
 		std::perror("Failure to pivot root"); 
 		return -1; 
 	}
+	pivoted = true; 
 
 	if(chdir("/") == -1)
 	{
@@ -63,6 +74,24 @@ int child_main(void* arg)
 	mount("proc", "/proc", "proc", 0, nullptr); 
 	std::cout << getpid() << std::endl; 
 	execv(args[0], args);
+	std::perror("execv failed");
+
+	fail: 
+		if(bind_mounted)
+		{
+			if(umount2(new_root, MNT_DETACH) == -1)
+			{
+				perror("failure to unmount bind"); 
+				 
+			}
+		}
+
+		if(umount2("/", MNT_DETACH) == -1)
+		{
+			perror("failure to unmount private");  
+		}
+
+		return -1; 
 	return 1; 
 }
 
