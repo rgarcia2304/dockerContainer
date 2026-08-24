@@ -7,6 +7,8 @@
 #include <vector> 
 #include <sys/mount.h>
 #include <cstring>
+#include <sys/syscall.h>
+#include <sys/stat.h>
 
 constexpr size_t STACK_SIZE = 1024 * 1024; 
 
@@ -18,8 +20,46 @@ int child_main(void* arg)
 	{
 		std::perror("set hostname failed");
 	}
-
+	
 	mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr); 
+
+	const char* new_root = "/home/cmpsc311/mini-rootfs";
+	if(mount(new_root, new_root, nullptr, MS_BIND, nullptr) == -1)
+	{
+		std::perror("Failure to mount root to itself"); 
+		return -1; 
+	}
+	
+	std::string old_root_path = std::string(new_root) + "/oldrootfs";
+	if(mkdir(old_root_path.c_str(), 0777) == -1)
+	{
+		std::perror("Failure to create old root path for destruction");
+		return -1; 
+	}
+
+	if(syscall(SYS_pivot_root, new_root, old_root_path.c_str()) == -1)
+	{
+		std::perror("Failure to pivot root"); 
+		return -1; 
+	}
+
+	if(chdir("/") == -1)
+	{
+		std::perror("Failure to change directories"); 
+		return -1; 
+	}
+
+	if(umount2("/oldrootfs", MNT_DETACH) == -1)
+	{
+		std::perror("Failure to unmount oldfs"); 
+		return -1; 
+	}
+
+	if(rmdir("/oldrootfs") == -1)
+	{
+		perror("failure to change directories"); 
+	}
+
 	mount("proc", "/proc", "proc", 0, nullptr); 
 	std::cout << getpid() << std::endl; 
 	execv(args[0], args);
